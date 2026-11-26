@@ -1,0 +1,7 @@
+build/
+build-linux/
+build-windows-mingw/
+build-windows-clang/
+*.zip
+*.user
+.vs/

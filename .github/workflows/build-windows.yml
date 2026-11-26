@@ -1,0 +1,58 @@
+name: Build Mix Aura Windows x64 VST3
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-vst3:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Configure Release x64
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build VST3
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --target MixAura_VST3 --parallel
+
+      - name: Validate and package VST3
+        shell: pwsh
+        run: |
+          $bundle = Get-ChildItem -Path build/MixAura_artefacts/Release/VST3 -Directory -Filter "MIX AURA ALL-IN-ONE.vst3"
+          if (-not $bundle) { throw "VST3 bundle was not generated" }
+          $dll = Get-ChildItem -Path $bundle.FullName -Recurse -Filter "MIX AURA ALL-IN-ONE.dll" -File
+          if (-not $dll -or $dll.Count -ne 1) { throw "Expected exactly one Windows x64 VST3 DLL" }
+          $bytes = [System.IO.File]::ReadAllBytes($dll.FullName)
+          if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw "Invalid PE/VST3 DLL" }
+          $peOffset = [BitConverter]::ToInt32($bytes, 60)
+          if ($peOffset + 24 -gt $bytes.Length -or
+              $bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45) { throw "Invalid PE signature" }
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          if ($machine -ne 0x8664) { throw "VST3 DLL is not x64 (machine=$machine)" }
+          $output = Join-Path $bundle.FullName "Contents/Resources"
+          if (-not (Test-Path (Join-Path $output "moduleinfo.json"))) { throw "moduleinfo.json is missing" }
+          Copy-Item README.txt "README-Windows.txt"
+          $package = "MIX-AURA-ALL-IN-ONE-Windows-x64"
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
+          Copy-Item $bundle.FullName (Join-Path $package "MIX AURA ALL-IN-ONE.vst3") -Recurse
+          Copy-Item README-Windows.txt $package/INSTRUCOES.txt
+          Compress-Archive -Path $package/* -DestinationPath "MIX-AURA-ALL-IN-ONE-Windows-x64.zip" -Force
+
+      - name: Upload Windows VST3 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: MIX-AURA-ALL-IN-ONE-Windows-x64
+          path: MIX-AURA-ALL-IN-ONE-Windows-x64.zip
+          if-no-files-found: error
