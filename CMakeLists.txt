@@ -14,8 +14,5 @@ juce_add_plugin(MixAura
     COPY_PLUGIN_AFTER_BUILD FALSE)
 target_sources(MixAura PRIVATE Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/AvatarComponent.cpp)
 target_compile_definitions(MixAura PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
-if(MINGW)
-    target_compile_options(MixAura PRIVATE -include cstring)
-endif()
 target_link_libraries(MixAura PRIVATE juce::juce_audio_utils juce::juce_dsp
     PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
