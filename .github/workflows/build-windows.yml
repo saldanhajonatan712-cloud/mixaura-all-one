@@ -70,8 +70,16 @@ jobs:
           Expand-Archive -Path $pluginvalZip -DestinationPath $pluginvalDir -Force
           $pluginvalExe = Join-Path $pluginvalDir "pluginval.exe"
           if (-not (Test-Path $pluginvalExe -PathType Leaf)) { throw "pluginval.exe is missing from the official release archive" }
-          & $pluginvalExe --strictness-level 5 $bundles[0].FullName
-          if ($LASTEXITCODE -ne 0) { throw "pluginval failed with exit code $LASTEXITCODE" }
+          $pluginvalStdout = Join-Path $env:RUNNER_TEMP "pluginval.stdout.log"
+          $pluginvalStderr = Join-Path $env:RUNNER_TEMP "pluginval.stderr.log"
+          $pluginvalArguments = "--strictness-level 5 `"$($bundles[0].FullName)`""
+          $pluginvalProcess = Start-Process -FilePath $pluginvalExe -ArgumentList $pluginvalArguments `
+            -NoNewWindow -Wait -PassThru -RedirectStandardOutput $pluginvalStdout -RedirectStandardError $pluginvalStderr
+          if (Test-Path $pluginvalStdout) { Get-Content $pluginvalStdout }
+          if (Test-Path $pluginvalStderr) { Get-Content $pluginvalStderr }
+          if ($pluginvalProcess.ExitCode -ne 0) {
+            throw "pluginval failed with exit code $($pluginvalProcess.ExitCode)"
+          }
 
       - name: Validate and package VST3
         shell: pwsh
