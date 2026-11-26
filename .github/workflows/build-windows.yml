@@ -37,8 +37,9 @@ jobs:
         run: |
           $bundle = Get-ChildItem -Path build/MixAura_artefacts/Release/VST3 -Directory -Filter "MIX AURA ALL-IN-ONE.vst3"
           if (-not $bundle) { throw "VST3 bundle was not generated" }
-          $dll = Get-ChildItem -Path $bundle.FullName -Recurse -Filter "*.dll" -File
-          if (-not $dll -or $dll.Count -ne 1) { throw "Expected exactly one Windows x64 VST3 DLL" }
+          $dll = Get-ChildItem -Path $bundle.FullName -Recurse -File |
+            Where-Object { $_.Extension -in @(".dll", ".vst3") }
+          if (-not $dll -or $dll.Count -ne 1) { throw "Expected exactly one Windows x64 VST3 module" }
           $bytes = [System.IO.File]::ReadAllBytes($dll.FullName)
           if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw "Invalid PE/VST3 DLL" }
           $peOffset = [BitConverter]::ToInt32($bytes, 60)
