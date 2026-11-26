@@ -130,6 +130,7 @@ jobs:
             throw "The generated ZIP is missing or unexpectedly small"
           }
           $zipSha256 = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Output "ZIP SHA-256: $zipSha256"
           "Generated ZIP: MixAura_VST3_Windows_x64.zip`nSHA-256: $zipSha256" |
             Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           $verify = Join-Path $env:RUNNER_TEMP "MIX-AURA-VERIFY"
