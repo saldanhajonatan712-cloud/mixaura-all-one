@@ -50,6 +50,29 @@ jobs:
         run: |
           cmake --build build --config Release --target MixAura_VST3 --parallel
 
+      - name: Validate VST3 with pluginval
+        shell: pwsh
+        run: |
+          $bundles = @(Get-ChildItem -Path build -Directory -Filter "*.vst3" -Recurse |
+            Where-Object { $_.Name -eq "MIX AURA ALL-IN-ONE.vst3" })
+          if ($bundles.Count -ne 1) { throw "Expected exactly one Mix Aura VST3 bundle for pluginval; found $($bundles.Count)" }
+
+          $pluginvalZip = Join-Path $env:RUNNER_TEMP "pluginval_Windows.zip"
+          $pluginvalUrl = "https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip"
+          Invoke-WebRequest -Uri $pluginvalUrl -OutFile $pluginvalZip
+          $expectedSha256 = "c08e61ce3b96db41636f8ec7e76f4c7e2c13ebdac7fa1b5a1f52b4f32ec715ab"
+          $actualSha256 = (Get-FileHash -Path $pluginvalZip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) {
+            throw "pluginval v1.0.4 checksum mismatch: $actualSha256"
+          }
+
+          $pluginvalDir = Join-Path $env:RUNNER_TEMP "pluginval"
+          Expand-Archive -Path $pluginvalZip -DestinationPath $pluginvalDir -Force
+          $pluginvalExe = Join-Path $pluginvalDir "pluginval.exe"
+          if (-not (Test-Path $pluginvalExe -PathType Leaf)) { throw "pluginval.exe is missing from the official release archive" }
+          & $pluginvalExe --strictness-level 5 $bundles[0].FullName
+          if ($LASTEXITCODE -ne 0) { throw "pluginval failed with exit code $LASTEXITCODE" }
+
       - name: Validate and package VST3
         shell: pwsh
         run: |
@@ -98,6 +121,9 @@ jobs:
           if (-not (Test-Path $zip -PathType Leaf) -or (Get-Item $zip).Length -lt 100KB) {
             throw "The generated ZIP is missing or unexpectedly small"
           }
+          $zipSha256 = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "Generated ZIP: MixAura_VST3_Windows_x64.zip`nSHA-256: $zipSha256" |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           $verify = Join-Path $env:RUNNER_TEMP "MIX-AURA-VERIFY"
           Expand-Archive -Path $zip -DestinationPath $verify -Force
           $installedBundle = Join-Path $verify "MIX AURA ALL-IN-ONE.vst3"
