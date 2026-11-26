@@ -26,9 +26,23 @@ jobs:
         with:
           arch: x64
 
+      - name: Verify Windows build tools
+        shell: pwsh
+        run: |
+          if ($env:VSCMD_ARG_TGT_ARCH -ne "x64") {
+            throw "MSVC target architecture is not x64: $env:VSCMD_ARG_TGT_ARCH"
+          }
+          if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) { throw "MSVC compiler cl.exe is unavailable" }
+          if (-not (Get-Command cmake.exe -ErrorAction SilentlyContinue)) { throw "CMake is unavailable" }
+          if (-not (Get-Command ninja.exe -ErrorAction SilentlyContinue)) { throw "Ninja is unavailable" }
+          cmake --version
+          ninja --version
+          cl.exe 2>&1 | Select-Object -First 4
+
       - name: Configure Release x64
         shell: pwsh
         run: |
+          cmake -E rm -rf build
           cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
 
       - name: Build VST3
@@ -43,10 +57,19 @@ jobs:
             Where-Object { $_.Name -eq "MIX AURA ALL-IN-ONE.vst3" })
           if ($bundles.Count -ne 1) { throw "Expected exactly one Mix Aura VST3 bundle; found $($bundles.Count)" }
           $bundle = $bundles[0]
-          $modules = @(Get-ChildItem -Path $bundle.FullName -Recurse -File |
+          $contents = Join-Path $bundle.FullName "Contents"
+          $resources = Join-Path $contents "Resources"
+          $windowsX64 = Join-Path $contents "x86_64-win"
+          foreach ($requiredPath in @($contents, $resources, $windowsX64)) {
+            if (-not (Test-Path $requiredPath -PathType Container)) {
+              throw "VST3 bundle is incomplete; required directory missing: $requiredPath"
+            }
+          }
+          $modules = @(Get-ChildItem -Path $windowsX64 -Recurse -File |
             Where-Object { $_.Extension -in @(".dll", ".vst3") })
-          if ($modules.Count -ne 1) { throw "Expected exactly one Windows x64 VST3 module; found $($modules.Count)" }
+          if ($modules.Count -ne 1) { throw "Expected exactly one Windows x64 module in Contents/x86_64-win; found $($modules.Count)" }
           $module = $modules[0]
+          if ($module.Length -eq 0) { throw "VST3 module is empty" }
           $bytes = [System.IO.File]::ReadAllBytes($module.FullName)
           if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw "Invalid PE/VST3 DLL" }
           $peOffset = [BitConverter]::ToInt32($bytes, 60)
@@ -55,29 +78,38 @@ jobs:
               $bytes[$peOffset + 2] -ne 0 -or $bytes[$peOffset + 3] -ne 0) { throw "Invalid PE signature" }
           $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
           if ($machine -ne 0x8664) { throw "VST3 DLL is not x64 (machine=$machine)" }
-          $moduleInfoPath = Join-Path $bundle.FullName "Contents/Resources/moduleinfo.json"
+          $moduleInfoPath = Join-Path $resources "moduleinfo.json"
           if (-not (Test-Path $moduleInfoPath)) {
             throw "VST3 moduleinfo.json is missing"
           }
           $moduleInfo = Get-Content -Path $moduleInfoPath -Raw -Encoding utf8
           $moduleInfo = [regex]::Replace($moduleInfo, ',(?=\s*[}\]])', '')
-          ConvertFrom-Json -InputObject $moduleInfo -ErrorAction Stop | Out-Null
+          $parsedModuleInfo = ConvertFrom-Json -InputObject $moduleInfo -ErrorAction Stop
+          if ($parsedModuleInfo.Name -ne "MIX AURA ALL-IN-ONE" -or $parsedModuleInfo.Classes.Count -lt 1) {
+            throw "VST3 module metadata does not identify the Mix Aura plugin"
+          }
           [System.IO.File]::WriteAllText($moduleInfoPath, $moduleInfo, [System.Text.UTF8Encoding]::new($false))
-          $package = Join-Path $env:RUNNER_TEMP "MIX-AURA-ALL-IN-ONE-Windows-x64"
-          $zip = Join-Path $env:RUNNER_TEMP "MIX-AURA-ALL-IN-ONE-Windows-x64.zip"
+          $package = Join-Path $env:RUNNER_TEMP "MixAura_VST3_Windows_x64"
+          $zip = Join-Path $env:RUNNER_TEMP "MixAura_VST3_Windows_x64.zip"
           New-Item -ItemType Directory -Force -Path $package | Out-Null
           Copy-Item $bundle.FullName (Join-Path $package "MIX AURA ALL-IN-ONE.vst3") -Recurse
           Copy-Item README.txt (Join-Path $package "INSTRUCOES.txt")
           Compress-Archive -Path (Join-Path $package "*") -DestinationPath $zip -Force
+          if (-not (Test-Path $zip -PathType Leaf) -or (Get-Item $zip).Length -lt 100KB) {
+            throw "The generated ZIP is missing or unexpectedly small"
+          }
           $verify = Join-Path $env:RUNNER_TEMP "MIX-AURA-VERIFY"
           Expand-Archive -Path $zip -DestinationPath $verify -Force
           $installedBundle = Join-Path $verify "MIX AURA ALL-IN-ONE.vst3"
-          if (-not (Test-Path (Join-Path $installedBundle "Contents/Resources/moduleinfo.json"))) {
-            throw "Extracted ZIP is missing the VST3 bundle resources"
+          foreach ($relativePath in @("Contents/Resources/moduleinfo.json", "Contents/x86_64-win")) {
+            if (-not (Test-Path (Join-Path $installedBundle $relativePath))) {
+              throw "Extracted ZIP is missing required VST3 bundle content: $relativePath"
+            }
           }
-          Get-Content -Path (Join-Path $installedBundle "Contents/Resources/moduleinfo.json") -Raw -Encoding utf8 |
-            ConvertFrom-Json -ErrorAction Stop | Out-Null
-          $extractedModules = @(Get-ChildItem -Path $installedBundle -Recurse -File |
+          $extractedMetadata = Get-Content -Path (Join-Path $installedBundle "Contents/Resources/moduleinfo.json") -Raw -Encoding utf8 |
+            ConvertFrom-Json -ErrorAction Stop
+          if ($extractedMetadata.Name -ne "MIX AURA ALL-IN-ONE") { throw "Extracted ZIP metadata is for the wrong plugin" }
+          $extractedModules = @(Get-ChildItem -Path (Join-Path $installedBundle "Contents/x86_64-win") -Recurse -File |
             Where-Object { $_.Extension -in @(".dll", ".vst3") })
           if ($extractedModules.Count -ne 1) { throw "Extracted ZIP has an invalid VST3 module count" }
           $extractedBytes = [System.IO.File]::ReadAllBytes($extractedModules[0].FullName)
@@ -87,6 +119,7 @@ jobs:
           $extractedPeOffset = [BitConverter]::ToInt32($extractedBytes, 60)
           if ($extractedPeOffset -lt 0 -or $extractedPeOffset + 24 -gt $extractedBytes.Length -or
               $extractedBytes[$extractedPeOffset] -ne 0x50 -or $extractedBytes[$extractedPeOffset + 1] -ne 0x45 -or
+              $extractedBytes[$extractedPeOffset + 2] -ne 0 -or $extractedBytes[$extractedPeOffset + 3] -ne 0 -or
               [BitConverter]::ToUInt16($extractedBytes, $extractedPeOffset + 4) -ne 0x8664) {
             throw "Extracted ZIP does not contain a valid Windows x64 PE module"
           }
@@ -95,6 +128,6 @@ jobs:
       - name: Upload Windows VST3 package
         uses: actions/upload-artifact@v4
         with:
-          name: MIX-AURA-ALL-IN-ONE-Windows-x64
-          path: ${{ runner.temp }}/MIX-AURA-ALL-IN-ONE-Windows-x64.zip
+          name: MixAura_VST3_Windows_x64
+          path: ${{ runner.temp }}/MixAura_VST3_Windows_x64.zip
           if-no-files-found: error
