@@ -4,6 +4,14 @@ MIX AURA ALL-IN-ONE - Projeto VST3 (JUCE / C++ / CMake)
 O pacote Windows gerado pelo GitHub Actions contem o binario VST3 compilado
 para Windows x64. O pacote deve ser baixado na pagina Actions do repositorio.
 
+INSTALACAO NO FL STUDIO
+1. Extraia o ZIP.
+2. Copie a pasta "MIX AURA ALL-IN-ONE.vst3" para:
+   C:\Program Files\Common Files\VST3\
+3. Abra o FL Studio.
+4. Em Options > Manage plugins, execute Find installed plugins.
+5. Adicione o efeito "MIX AURA ALL-IN-ONE" a um slot do Mixer.
+
 REQUISITOS (Windows 10/11)
 - Visual Studio 2022 com o workload "Desenvolvimento para desktop com C++"
 - CMake 3.22 ou superior (ja vem com o Visual Studio 2022)
