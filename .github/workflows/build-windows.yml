@@ -55,9 +55,14 @@ jobs:
               $bytes[$peOffset + 2] -ne 0 -or $bytes[$peOffset + 3] -ne 0) { throw "Invalid PE signature" }
           $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
           if ($machine -ne 0x8664) { throw "VST3 DLL is not x64 (machine=$machine)" }
-          if (-not (Test-Path (Join-Path $bundle.FullName "Contents/Resources/moduleinfo.json"))) {
+          $moduleInfoPath = Join-Path $bundle.FullName "Contents/Resources/moduleinfo.json"
+          if (-not (Test-Path $moduleInfoPath)) {
             throw "VST3 moduleinfo.json is missing"
           }
+          $moduleInfo = Get-Content -Path $moduleInfoPath -Raw -Encoding utf8
+          $moduleInfo = [regex]::Replace($moduleInfo, ',(?=\s*[}\]])', '')
+          ConvertFrom-Json -InputObject $moduleInfo -ErrorAction Stop | Out-Null
+          [System.IO.File]::WriteAllText($moduleInfoPath, $moduleInfo, [System.Text.UTF8Encoding]::new($false))
           $package = Join-Path $env:RUNNER_TEMP "MIX-AURA-ALL-IN-ONE-Windows-x64"
           $zip = Join-Path $env:RUNNER_TEMP "MIX-AURA-ALL-IN-ONE-Windows-x64.zip"
           New-Item -ItemType Directory -Force -Path $package | Out-Null
@@ -70,6 +75,8 @@ jobs:
           if (-not (Test-Path (Join-Path $installedBundle "Contents/Resources/moduleinfo.json"))) {
             throw "Extracted ZIP is missing the VST3 bundle resources"
           }
+          Get-Content -Path (Join-Path $installedBundle "Contents/Resources/moduleinfo.json") -Raw -Encoding utf8 |
+            ConvertFrom-Json -ErrorAction Stop | Out-Null
           $extractedModules = @(Get-ChildItem -Path $installedBundle -Recurse -File |
             Where-Object { $_.Extension -in @(".dll", ".vst3") })
           if ($extractedModules.Count -ne 1) { throw "Extracted ZIP has an invalid VST3 module count" }
